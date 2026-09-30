@@ -115,6 +115,25 @@ router.post('/businesses/register', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// PUT: Update business status
+router.put('/admin/businesses/:id', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const updatedBusiness = await Business.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
+
+    if (!updatedBusiness) {
+      return res.status(404).json({ success: false, message: 'Business not found' });
+    }
+
+    res.json({ success: true, data: updatedBusiness });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // Delete business
 router.delete('/businesses/:id', async (req, res) => {
