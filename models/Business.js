@@ -9,7 +9,7 @@ const BusinessSchema = new mongoose.Schema({
   city: { type: String, required: true },
   serviceCategory: { 
     type: String, 
-    required: true // <-- enum array hata diya, ab koi bhi category chalegi
+    required: true // <-- enum validation is not applied here, but you can add it if needed
   },
   status: { 
     type: String, 

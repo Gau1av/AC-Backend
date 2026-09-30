@@ -115,25 +115,32 @@ router.post('/businesses/register', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// PUT: Update business status
-router.put('/admin/businesses/:id', async (req, res) => {
+
+// PUT: Update business status (runValidators: false ke saath)
+const updateBusinessStatusHandler = async (req, res) => {
   try {
     const { status } = req.body;
+
     const updatedBusiness = await Business.findByIdAndUpdate(
       req.params.id,
-      { status },
-      { new: true }
+      { $set: { status: status } },
+      { new: true, runValidators: false } // <-- runValidators false hone se purana enum check nahi hoga
     );
 
     if (!updatedBusiness) {
-      return res.status(404).json({ success: false, message: 'Business not found' });
+      return res.status(404).json({ success: false, message: 'Business nahi mila' });
     }
 
     res.json({ success: true, data: updatedBusiness });
   } catch (err) {
+    console.error('Update error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
-});
+};
+
+// Route handlers for both relative and prefixed routes
+router.put('/businesses/:id', updateBusinessStatusHandler);
+router.put('/admin/businesses/:id', updateBusinessStatusHandler);
 
 // Delete business
 router.delete('/businesses/:id', async (req, res) => {
