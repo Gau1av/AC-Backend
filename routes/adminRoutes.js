@@ -116,15 +116,14 @@ router.post('/businesses/register', async (req, res) => {
   }
 });
 
-// PUT: Update business status (runValidators: false ke saath)
-const updateBusinessStatusHandler = async (req, res) => {
+// PUT: Update business status
+const updateStatus = async (req, res) => {
   try {
     const { status } = req.body;
-
     const updatedBusiness = await Business.findByIdAndUpdate(
       req.params.id,
       { $set: { status: status } },
-      { new: true, runValidators: false } // <-- runValidators false hone se purana enum check nahi hoga
+      { new: true, runValidators: false }
     );
 
     if (!updatedBusiness) {
@@ -138,9 +137,9 @@ const updateBusinessStatusHandler = async (req, res) => {
   }
 };
 
-// Route handlers for both relative and prefixed routes
-router.put('/businesses/:id', updateBusinessStatusHandler);
-router.put('/admin/businesses/:id', updateBusinessStatusHandler);
+// Dono routes mapped taaki route prefix ka issue na aaye
+router.put('/businesses/:id', updateStatus);
+router.put('/admin/businesses/:id', updateStatus);
 
 // Delete business
 router.delete('/businesses/:id', async (req, res) => {
