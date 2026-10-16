@@ -2,104 +2,71 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const fsPromises = require('fs').promises;
 
-// Optional: sharp pre-load check (done once at startup)
-let sharp = null;
-try {
-  sharp = require('sharp');
-} catch (_) {
-  console.log('ℹ️ Sharp library not found. Falling back to native buffer file write.');
-}
-
-const uploadDir = path.join(__dirname, '..', 'uploads', 'blog-covers');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Memory storage for buffer-based processing
+// Memory storage use karein (Render filesystem write completely bypass ho jayega)
 const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 4 * 1024 * 1024 }, // 4MB safe limit
   fileFilter: (req, file, cb) => {
     const isMimeValid = /image\/(jpeg|jpg|png|webp)/i.test(file.mimetype);
-    const isExtValid = /\.(jpe?g|png|webp)$/i.test(path.extname(file.originalname));
-
-    if (isMimeValid && isExtValid) {
+    if (isMimeValid) {
       cb(null, true);
     } else {
       cb(new Error('INVALID_FILE_TYPE'));
     }
-  },
+  }
 });
 
 // ✅ POST /api/admin/upload/blog-cover
 router.post('/blog-cover', (req, res) => {
-  upload.single('image')(req, res, async (err) => {
-    // Catch Multer-specific errors cleanly
+  upload.single('image')(req, res, (err) => {
     if (err) {
+      console.error('❌ Upload validation error:', err.message);
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({
           success: false,
-          message: 'Image size exceeds the 5MB limit.',
+          message: 'Image size too large. Maximum allowed size is 4MB.'
         });
       }
       if (err.message === 'INVALID_FILE_TYPE') {
         return res.status(400).json({
           success: false,
-          message: 'Only JPG, JPEG, PNG, and WEBP image files are allowed.',
+          message: 'Only JPG, JPEG, PNG, and WEBP formats are allowed.'
         });
       }
       return res.status(400).json({
         success: false,
-        message: err.message || 'File upload validation failed.',
+        message: err.message || 'Image upload error'
+      });
+    }
+
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: 'No image file uploaded.'
       });
     }
 
     try {
-      if (!req.file || !req.file.buffer) {
-        return res.status(400).json({
-          success: false,
-          message: 'No image file uploaded. Please select an image.',
-        });
-      }
+      // Direct Data URI format generate karein: data:image/png;base64,....
+      const base64Data = req.file.buffer.toString('base64');
+      const dataUri = `data:${req.file.mimetype};base64,${base64Data}`;
 
-      // Safe extension extraction
-      let ext = path.extname(req.file.originalname).toLowerCase().replace('.', '');
-      if (!['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
-        ext = req.file.mimetype === 'image/png' ? 'png' : req.file.mimetype === 'image/webp' ? 'webp' : 'jpg';
-      }
-
-      const filename = `blog-${Date.now()}-${Math.round(Math.random() * 1e6)}.${ext}`;
-      const filepath = path.join(uploadDir, filename);
-
-      // Process via Sharp (if available) or non-blocking async write
-      if (sharp) {
-        await sharp(req.file.buffer)
-          .resize(1200, 630, { fit: 'cover', position: 'center' })
-          .toFile(filepath);
-      } else {
-        await fsPromises.writeFile(filepath, req.file.buffer);
-      }
-
-      const fileUrl = `/uploads/blog-covers/${filename}`;
+      console.log('✅ Image converted to Base64 URI successfully');
 
       return res.status(200).json({
         success: true,
         message: 'Image uploaded successfully',
-        url: fileUrl,
-        filename,
+        url: dataUri
       });
-    } catch (processErr) {
-      console.error('❌ Upload processing error:', processErr);
+    } catch (encodeErr) {
+      console.error('❌ Base64 encode error:', encodeErr);
       return res.status(500).json({
         success: false,
-        message: 'Internal server error while saving the image.',
-        error: processErr.message,
+        message: 'Failed to process image data',
+        error: encodeErr.message
       });
     }
   });
