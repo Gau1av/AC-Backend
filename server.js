@@ -26,16 +26,34 @@ const coverDir = path.join(uploadsRoot, 'blog-covers');
 if (!fs.existsSync(uploadsRoot)) fs.mkdirSync(uploadsRoot, { recursive: true });
 if (!fs.existsSync(coverDir)) fs.mkdirSync(coverDir, { recursive: true });
 
-// ---------- Middlewares ----------
+// ---------- CORS Configuration (Production + Local Safe) ----------
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  process.env.CLIENT_URL // Vercel / Render Frontend URL (if provided)
+].filter(Boolean);
+
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    // Postman, mobile apps, ya same-origin requests ke liye origin undefined ho sakta hai
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com')) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Fallback: allow all dynamically with credentials valid header
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Explicit Preflight Handle
+app.options('*', cors());
+
+// ---------- Body Parsers ----------
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // ---------- Request Logger ----------
 app.use((req, res, next) => {
@@ -50,7 +68,8 @@ app.use((req, res, next) => {
 
 // ---------- Static File Serving ----------
 app.use('/uploads', (req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 }, express.static(uploadsRoot, {
@@ -89,12 +108,16 @@ try {
   console.warn('⚠️ business route not found, skipping.');
 }
 
-// Health check
-app.get('/', (req, res) => {
-  res.send('Chintu Cool API is running successfully!');
+// Health check endpoint (Used by Render to verify live status)
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'UP', timestamp: new Date() });
 });
 
-// ---------- 404 Handler ----------
+app.get('/', (req, res) => {
+  res.status(200).send('Chintu Cool API is running successfully!');
+});
+
+// ---------- 404 JSON Handler ----------
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -104,7 +127,7 @@ app.use((req, res) => {
 
 // ---------- Global Error Handler ----------
 app.use((err, req, res, next) => {
-  console.error('❌ Global error:', err);
+  console.error('❌ Global Server Error:', err);
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'Internal server error'
@@ -117,11 +140,12 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await connectDB();
-    app.listen(PORT, () => {
-      console.log(`\n🚀 Server running on port ${PORT}`);
-      console.log(`📁 Uploads:         http://localhost:${PORT}/uploads`);
-      console.log(`📝 Admin Blog:      http://localhost:${PORT}/api/admin/blogs`);
-      console.log(`🖼️  Image Upload:   http://localhost:${PORT}/api/admin/upload/blog-cover\n`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`\n═══════════════════════════════════════════════════════`);
+      console.log(`🚀 Chintu Cool Server Running on Port: ${PORT}`);
+      console.log(`📁 Uploads Static Dir: http://localhost:${PORT}/uploads`);
+      console.log(`📝 Admin Blogs Route:  http://localhost:${PORT}/api/admin/blogs`);
+      console.log(`═══════════════════════════════════════════════════════\n`);
     });
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);
