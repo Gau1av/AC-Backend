@@ -26,30 +26,31 @@ const coverDir = path.join(uploadsRoot, 'blog-covers');
 if (!fs.existsSync(uploadsRoot)) fs.mkdirSync(uploadsRoot, { recursive: true });
 if (!fs.existsSync(coverDir)) fs.mkdirSync(coverDir, { recursive: true });
 
-// ---------- CORS Configuration (Production + Local Safe) ----------
+// ---------- CORS Configuration ----------
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
-  process.env.CLIENT_URL // Vercel / Render Frontend URL (if provided)
+  process.env.CLIENT_URL
 ].filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
-    // Postman, mobile apps, ya same-origin requests ke liye origin undefined ho sakta hai
     if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com')) {
       callback(null, true);
     } else {
-      callback(null, true); // Fallback: allow all dynamically with credentials valid header
+      callback(null, true);
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-}));
+};
 
-// Explicit Preflight Handle
-app.options('*', cors());
+app.use(cors(corsOptions));
+
+// ✅ Express 5 safe preflight options handler (DO NOT use '*')
+app.options(/(.*)/, cors(corsOptions));
 
 // ---------- Body Parsers ----------
 app.use(express.json({ limit: '15mb' }));
@@ -108,7 +109,7 @@ try {
   console.warn('⚠️ business route not found, skipping.');
 }
 
-// Health check endpoint (Used by Render to verify live status)
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'UP', timestamp: new Date() });
 });
