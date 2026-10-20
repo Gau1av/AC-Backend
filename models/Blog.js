@@ -54,7 +54,7 @@ const blogSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Draft', 'Published'],
+      enum: ['Draft', 'Pending', 'Published'],
       default: 'Draft',
       index: true
     },

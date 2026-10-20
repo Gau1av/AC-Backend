@@ -5,6 +5,7 @@ const adminController = require('../controllers/adminController');
 const inquiryController = require('../controllers/inquiryController');
 const Business = require('../models/Business'); // Business Model import karein
 const Inquiry = require('../models/Inquiry');   // Inquiry Model import karein
+const { getRolePermissions } = require('../middleware/adminAuth');
 
 // Debugging checks
 console.log('adminLogin exists?', typeof adminController?.adminLogin === 'function');
@@ -17,6 +18,14 @@ console.log('getAnalytics exists?', typeof inquiryController?.getAnalytics === '
 router.post('/login', adminController.adminLogin || ((req, res) => {
   res.status(500).json({ success: false, message: 'adminLogin function missing in adminController.js' });
 }));
+
+router.get('/me', (req, res) => {
+  res.json({
+    success: true,
+    role: req.admin.role,
+    permissions: getRolePermissions(req.admin.role)
+  });
+});
 
 // ==============================
 // 2. DYNAMIC TOP STATS ROUTE (Live Database Count)

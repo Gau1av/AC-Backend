@@ -4,6 +4,53 @@ const router = express.Router();
 const Blog = require('../models/Blog');
 const Comment = require('../models/Comment');
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Public submissions are always held for administrator review.
+router.post('/submit', async (req, res) => {
+  try {
+    const { title, author, category, excerpt, content } = req.body;
+    if (!title?.trim() || !author?.trim() || !content?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title, author name, and blog content are required'
+      });
+    }
+
+    if (title.trim().length > 200 || author.trim().length > 100 ||
+        excerpt?.trim().length > 300 || content.trim().length > 20000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title, author, summary, or story exceeds the allowed length'
+      });
+    }
+
+    const slugBase = title
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '') || 'community-story';
+    const blog = await Blog.create({
+      title: title.trim(),
+      slug: `${slugBase}-${Date.now()}`,
+      author: author.trim(),
+      category: category || 'Other',
+      excerpt: excerpt?.trim() || '',
+      content: content.trim(),
+      status: 'Draft'
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Your story was submitted for review.',
+      data: { id: blog._id }
+    });
+  } catch (err) {
+    console.error('Community blog submission error:', err);
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // GET published blogs (list)
 router.get('/', async (req, res) => {
   try {
@@ -11,10 +58,11 @@ router.get('/', async (req, res) => {
     const query = { status: 'Published' };
     if (category && category !== 'All') query.category = category;
     if (search) {
+      const safeSearch = escapeRegex(String(search).trim());
       query.$or = [
-        { title: new RegExp(search, 'i') },
-        { excerpt: new RegExp(search, 'i') },
-        { content: new RegExp(search, 'i') }
+        { title: new RegExp(safeSearch, 'i') },
+        { excerpt: new RegExp(safeSearch, 'i') },
+        { content: new RegExp(safeSearch, 'i') }
       ];
     }
 
