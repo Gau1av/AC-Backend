@@ -7,7 +7,7 @@ const blogSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Blog title is required'],
       trim: true,
-      maxlength: [200, 'Title cannot exceed 200 characters']
+      maxlength: [250, 'Title cannot exceed 250 characters']
     },
     slug: {
       type: String,
@@ -18,19 +18,8 @@ const blogSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      required: true,
       default: 'AC Repair',
-      trim: true,
-      enum: [
-        'AC Repair',
-        'Refrigerator',
-        'Washing Machine',
-        'Microwave',
-        'Preventive Maintenance',
-        'Tips & Tricks',
-        'News',
-        'Other'
-      ]
+      trim: true
     },
     author: {
       type: String,
@@ -41,8 +30,7 @@ const blogSchema = new mongoose.Schema(
     excerpt: {
       type: String,
       default: '',
-      trim: true,
-      maxlength: [300, 'Excerpt cannot exceed 300 characters']
+      trim: true
     },
     content: {
       type: String,
@@ -50,7 +38,11 @@ const blogSchema = new mongoose.Schema(
     },
     imageUrl: {
       type: String,
-      default: '' // Supports local upload URL, Cloudinary, or Base64 Data URI
+      default: ''
+    },
+    galleryImages: {
+      type: [String],
+      default: []
     },
     status: {
       type: String,
@@ -60,26 +52,12 @@ const blogSchema = new mongoose.Schema(
     },
     views: {
       type: Number,
-      default: 0,
-      min: 0
+      default: 0
     },
-    // SEO & Meta Fields
-    metaTitle: {
-      type: String,
-      default: '',
-      trim: true
-    },
-    metaDescription: {
-      type: String,
-      default: '',
-      trim: true
-    },
-    tags: [
-      {
-        type: String,
-        trim: true
-      }
-    ]
+    viewedBy: {
+      type: [String],
+      default: []
+    }
   },
   {
     timestamps: true,
@@ -88,44 +66,16 @@ const blogSchema = new mongoose.Schema(
   }
 );
 
-// Virtual field: Reading time estimate (approx 200 words per minute)
-blogSchema.virtual('readingTime').get(function () {
-  if (!this.content) return '1 min read';
-  const cleanText = this.content.replace(/<[^>]*>?/gm, '');
-  const wordsCount = cleanText.split(/\s+/).filter(Boolean).length;
-  const minutes = Math.ceil(wordsCount / 200) || 1;
-  return `${minutes} min read`;
-});
-
-// Pre-save middleware: Auto slug & excerpt generation
-blogSchema.pre('save', function (next) {
-  // 1. Auto generate slug if missing
+// Slug auto-generation safe hook (No next parameter)
+blogSchema.pre('save', function () {
   if (!this.slug && this.title) {
-    this.slug = this.title
+    const cleanTitle = this.title
       .toLowerCase()
       .trim()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
+    this.slug = `${cleanTitle || 'story'}-${Date.now().toString().slice(-6)}`;
   }
-
-  // 2. Auto generate excerpt from content if missing
-  if (!this.excerpt && this.content) {
-    const plainText = this.content.replace(/<[^>]*>?/gm, '').trim();
-    this.excerpt = plainText.length > 160 ? plainText.substring(0, 157) + '...' : plainText;
-  }
-
-  // 3. Auto metaTitle fallback
-  if (!this.metaTitle && this.title) {
-    this.metaTitle = this.title;
-  }
-
-  next();
 });
-
-// Indexing:
-// High performance search index
-blogSchema.index({ title: 'text', author: 'text', category: 'text' });
-// Fast sorting for Home page queries
-blogSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Blog', blogSchema);
