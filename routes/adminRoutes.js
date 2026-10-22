@@ -1,43 +1,70 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const xlsx = require('xlsx');
 
 const adminController = require('../controllers/adminController');
 const inquiryController = require('../controllers/inquiryController');
-const Business = require('../models/Business'); // Business Model import karein
-const Inquiry = require('../models/Inquiry');   // Inquiry Model import karein
-const { getRolePermissions } = require('../middleware/adminAuth');
+const Business = require('../models/Business');
+const Inquiry = require('../models/Inquiry');
+const {
+  authorizeAdminRoute,
+  getRolePermissions
+} = require('../middleware/adminAuth');
 
-// Debugging checks
-console.log('adminLogin exists?', typeof adminController?.adminLogin === 'function');
-console.log('getInquiries exists?', typeof inquiryController?.getInquiries === 'function');
-console.log('getAnalytics exists?', typeof inquiryController?.getAnalytics === 'function');
+// In-memory upload for Excel importing
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
 
-// ==============================
-// 1. AUTH ROUTES
-// ==============================
-router.post('/login', adminController.adminLogin || ((req, res) => {
+// ============================================================================
+// 1. PUBLIC AUTH ROUTE
+// ============================================================================
+router.post('/login', adminController?.adminLogin || ((req, res) => {
   res.status(500).json({ success: false, message: 'adminLogin function missing in adminController.js' });
 }));
 
+// ============================================================================
+// 2. GLOBAL ROLE & PERMISSION GUARD (Protects all routes below)
+// ============================================================================
+router.use(authorizeAdminRoute);
+
+// ============================================================================
+// 3. SESSION VERIFICATION (/api/admin/me)
+// ============================================================================
 router.get('/me', (req, res) => {
-  res.json({
-    success: true,
-    role: req.admin.role,
-    permissions: getRolePermissions(req.admin.role)
-  });
+  try {
+    const role = (req.admin?.role || 'manager').toLowerCase();
+    const permissions = req.admin?.permissions || getRolePermissions(role) || [];
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        authenticated: true,
+        role,
+        permissions
+      }
+    });
+  } catch (err) {
+    console.error('❌ /api/admin/me error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to verify session profile' });
+  }
 });
 
-// ==============================
-// 2. DYNAMIC TOP STATS ROUTE (Live Database Count)
-// ==============================
+// ============================================================================
+// 4. DYNAMIC TOP STATS
+// ============================================================================
 router.get('/stats', async (req, res) => {
   try {
-    const totalBusiness = await Business.countDocuments();
-    const totalPaid = await Business.countDocuments({ isPaid: true });
-    const totalLead = await Inquiry.countDocuments();
-    const totalContact = await Inquiry.countDocuments({ status: 'Contacted' });
+    const [totalBusiness, totalPaid, totalLead, totalContact] = await Promise.all([
+      Business.countDocuments(),
+      Business.countDocuments({ isPaid: true }),
+      Inquiry.countDocuments(),
+      Inquiry.countDocuments({ status: { $in: ['Resolved', 'In Progress'] } })
+    ]);
 
-    res.json({
+    return res.status(200).json({
       success: true,
       stats: {
         totalBusiness,
@@ -47,28 +74,29 @@ router.get('/stats', async (req, res) => {
       }
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to fetch dynamic stats', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch dynamic stats', error: err.message });
   }
 });
 
-// ==============================
-// 3. INQUIRIES & LEADS ROUTES
-// ==============================
-router.get('/inquiries', inquiryController.getInquiries || ((req, res) => {
+// ============================================================================
+// 5. INQUIRIES & LEADS MANAGEMENT
+// ============================================================================
+router.get('/inquiries', inquiryController?.getInquiries || ((req, res) => {
   res.status(500).json({ success: false, message: 'getInquiries function missing in inquiryController.js' });
 }));
-router.post('/inquiries', inquiryController.createInquiry);
-router.delete('/inquiries/:id', inquiryController.deleteInquiry);
-router.put('/inquiries/:id', inquiryController.updateInquiryStatus);
-router.get('/analytics', inquiryController.getAnalytics || ((req, res) => {
+router.post('/inquiries', inquiryController?.createInquiry);
+router.delete('/inquiries/:id', inquiryController?.deleteInquiry);
+router.put('/inquiries/:id', inquiryController?.updateInquiryStatus);
+
+router.get('/analytics', inquiryController?.getAnalytics || ((req, res) => {
   res.status(500).json({ success: false, message: 'getAnalytics function missing in inquiryController.js' });
 }));
 
-// ==============================
-// 4. BUSINESS DIRECTORY & FILTERS (Category, State, City, Search)
-// ==============================
+// ============================================================================
+// 6. BUSINESS DIRECTORY & EXCEL IMPORT
+// ============================================================================
 
-// Fetch businesses with multi-filters
+// Fetch businesses with filters
 router.get('/businesses', async (req, res) => {
   try {
     const { category, state, city, search } = req.query;
@@ -85,53 +113,97 @@ router.get('/businesses', async (req, res) => {
     }
     if (search) {
       filter.$or = [
-        { businessName: { $regex: search,$options: 'i' } },
-        { ownerName: { $regex: search,$options: 'i' } },
-        { phone: { $regex: search,$options: 'i' } }
+        { businessName: { $regex: search, $options: 'i' } },
+        { ownerName: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
       ];
     }
 
     const list = await Business.find(filter).sort({ createdAt: -1 });
-    res.json({ success: true, count: list.length, data: list });
+    return res.status(200).json({ success: true, count: list.length, data: list });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// Register new business
+// Register single business
 router.post('/businesses/register', async (req, res) => {
   try {
     const { businessName, ownerName, phone, state, city, serviceCategory, isPaid, status } = req.body;
-    
+
     if (!businessName || !ownerName || !phone || !city) {
       return res.status(400).json({ success: false, message: 'Sabhi required fields bharna zaroori hai' });
     }
 
     const newBiz = new Business({
-      businessName,
-      ownerName,
-      phone,
-      state: state || 'Delhi',
-      city,
-      serviceCategory: serviceCategory || 'AC Service & Repair',
+      businessName: businessName.trim(),
+      ownerName: ownerName.trim(),
+      phone: phone.trim(),
+      state: state || 'Delhi (NCT)',
+      city: city.trim(),
+      serviceCategory: serviceCategory || 'AC Service & Gas Charging',
       isPaid: Boolean(isPaid),
       status: status || 'Active'
     });
 
     await newBiz.save();
-    res.status(201).json({ success: true, message: 'Business registered successfully!', data: newBiz });
+    return res.status(201).json({ success: true, message: 'Business registered successfully!', data: newBiz });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// PUT: Update business status
-const updateStatus = async (req, res) => {
+// Excel bulk upload
+router.post('/businesses/bulk-upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Please attach an Excel or CSV file' });
+    }
+
+    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const rawRows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+    if (!rawRows.length) {
+      return res.status(400).json({ success: false, message: 'Excel file is empty' });
+    }
+
+    const validBusinesses = rawRows
+      .filter((r) => r.businessName && r.phone)
+      .map((r) => ({
+        businessName: String(r.businessName).trim(),
+        ownerName: String(r.ownerName || 'Verified Technician').trim(),
+        phone: String(r.phone).trim(),
+        state: String(r.state || 'Delhi (NCT)').trim(),
+        city: String(r.city || 'New Delhi').trim(),
+        serviceCategory: String(r.serviceCategory || 'AC Service & Gas Charging').trim(),
+        status: r.status || 'Active',
+        isPaid: Boolean(r.isPaid === true || r.isPaid === 'true')
+      }));
+
+    if (!validBusinesses.length) {
+      return res.status(400).json({ success: false, message: 'No valid business rows found (businessName and phone are required)' });
+    }
+
+    await Business.insertMany(validBusinesses, { ordered: false });
+    return res.status(200).json({
+      success: true,
+      message: `${validBusinesses.length} businesses imported successfully!`,
+      count: validBusinesses.length
+    });
+  } catch (err) {
+    console.error('Bulk upload error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Error processing Excel file' });
+  }
+});
+
+// Update business status
+router.put('/businesses/:id', async (req, res) => {
   try {
     const { status } = req.body;
     const updatedBusiness = await Business.findByIdAndUpdate(
       req.params.id,
-      { $set: { status: status } },
+      { $set: { status } },
       { new: true, runValidators: false }
     );
 
@@ -139,24 +211,19 @@ const updateStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Business nahi mila' });
     }
 
-    res.json({ success: true, data: updatedBusiness });
+    return res.status(200).json({ success: true, data: updatedBusiness });
   } catch (err) {
-    console.error('Update error:', err);
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
-};
-
-// Dono routes mapped taaki route prefix ka issue na aaye
-router.put('/businesses/:id', updateStatus);
-router.put('/admin/businesses/:id', updateStatus);
+});
 
 // Delete business
 router.delete('/businesses/:id', async (req, res) => {
   try {
     await Business.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Business successfully deleted' });
+    return res.status(200).json({ success: true, message: 'Business successfully deleted' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
