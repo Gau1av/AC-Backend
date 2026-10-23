@@ -1,100 +1,94 @@
 const express = require('express');
 const router = express.Router();
-const path = require('path');
-const fs = require('fs');
-const multer = require('multer');
+const Comment = require('../models/Comment');
 const Blog = require('../models/Blog');
 
-// 1. Uploads directory setup
-const uploadDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+// ==========================================
+// 💬 PUBLIC: Post a comment on a blog
+// Endpoint: POST /api/blogs/:id/comments
+// ==========================================
+router.post('/:id/comments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, message } = req.body;
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `blog-${Date.now()}${ext}`);
-  }
-});
+    if (!name || !email || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email, and comment message are required.'
+      });
+    }
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (/image\/(jpeg|jpg|png|webp)/.test(file.mimetype)) {
-      cb(null, true);
+    // Check if blog exists by ID or Slug
+    let blogDoc;
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      blogDoc = await Blog.findById(id);
     } else {
-      cb(new Error('Only JPG, PNG, and WEBP are allowed'));
-    }
-  }
-});
-
-// 2. Cover image upload route
-router.post('/upload/blog-cover', upload.single('image'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ success: false, message: 'No file uploaded' });
-  }
-  const fileUrl = `/uploads/${req.file.filename}`;
-  res.json({ success: true, url: fileUrl });
-});
-
-// 3. GET all blogs (with optional search & status filter)
-router.get('/blogs', async (req, res) => {
-  try {
-    const { search, status } = req.query;
-    let query = {};
-
-    if (status) query.status = status;
-    if (search) {
-      query.$or = [
-        { title: { $regex: search,$options: 'i' } },
-        { author: { $regex: search,$options: 'i' } },
-        { category: { $regex: search,$options: 'i' } }
-      ];
+      blogDoc = await Blog.findOne({ slug: id });
     }
 
-    const blogs = await Blog.find(query).sort({ createdAt: -1 });
-    res.json({ success: true, data: blogs });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// 4. POST create blog
-router.post('/blogs', async (req, res) => {
-  try {
-    const blog = new Blog(req.body);
-    await blog.save();
-    res.status(201).json({ success: true, data: blog, message: 'Blog created successfully' });
-  } catch (err) {
-    if (err.code === 11000) {
-      return res.status(400).json({ success: false, message: 'Blog with this slug already exists' });
+    if (!blogDoc) {
+      return res.status(404).json({
+        success: false,
+        message: 'Blog post not found.'
+      });
     }
-    res.status(500).json({ success: false, message: err.message });
+
+    const newComment = new Comment({
+      blog: blogDoc._id,
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      message: message.trim(),
+      status: 'Approved' // Directly approve so user can see their comment
+    });
+
+    await newComment.save();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Comment posted successfully!',
+      data: newComment
+    });
+  } catch (err) {
+    console.error('Comment submit error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to submit comment'
+    });
   }
 });
 
-// 5. PUT update blog
-router.put('/blogs/:id', async (req, res) => {
+// ==========================================
+// 💬 PUBLIC: Get approved comments for a blog
+// Endpoint: GET /api/blogs/:id/comments
+// ==========================================
+router.get('/:id/comments', async (req, res) => {
   try {
-    const updated = await Blog.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!updated) return res.status(404).json({ success: false, message: 'Blog not found' });
-    res.json({ success: true, data: updated, message: 'Blog updated successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
+    const { id } = req.params;
 
-// 6. DELETE blog
-router.delete('/blogs/:id', async (req, res) => {
-  try {
-    const deleted = await Blog.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ success: false, message: 'Blog not found' });
-    res.json({ success: true, message: 'Blog deleted successfully' });
+    let blogDoc;
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      blogDoc = await Blog.findById(id);
+    } else {
+      blogDoc = await Blog.findOne({ slug: id });
+    }
+
+    if (!blogDoc) {
+      return res.status(404).json({ success: false, message: 'Blog post not found.' });
+    }
+
+    const comments = await Comment.find({
+      blog: blogDoc._id,
+      status: 'Approved'
+    }).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: comments.length,
+      data: comments
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 

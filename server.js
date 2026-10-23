@@ -26,6 +26,7 @@ const adminReports   = require('./routes/adminReports');
 const publicBlogs    = require('./routes/blogs');
 const publicComments = require('./routes/comments');
 const newsletter     = require('./routes/newsletter');
+const blogRoutes = require('./routes/blogRoutes');
 
 // 3. Security Middlewares
 const {
@@ -131,6 +132,7 @@ app.use('/api/newsletter/admin', authenticateAdmin, authorizeSection('subscriber
 app.use('/api/blogs', publicBlogs);
 app.use('/api/comments', publicComments);
 app.use('/api/newsletter', newsletter);
+app.use('/api/blogs', blogRoutes);
 
 // 6. Dynamic Inquiries & Partner Businesses Routes
 try {
