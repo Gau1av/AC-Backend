@@ -7,6 +7,8 @@ const adminController = require('../controllers/adminController');
 const inquiryController = require('../controllers/inquiryController');
 const Business = require('../models/Business');
 const Inquiry = require('../models/Inquiry');
+const Blog = require('../models/Blog');
+const Comment = require('../models/Comment');
 const {
   authorizeAdminRoute,
   getRolePermissions
@@ -95,8 +97,6 @@ router.get('/analytics', inquiryController?.getAnalytics || ((req, res) => {
 // ============================================================================
 // 6. BUSINESS DIRECTORY & EXCEL IMPORT
 // ============================================================================
-
-// Fetch businesses with filters
 router.get('/businesses', async (req, res) => {
   try {
     const { category, state, city, search } = req.query;
@@ -126,7 +126,6 @@ router.get('/businesses', async (req, res) => {
   }
 });
 
-// Register single business
 router.post('/businesses/register', async (req, res) => {
   try {
     const { businessName, ownerName, phone, state, city, serviceCategory, isPaid, status } = req.body;
@@ -141,7 +140,7 @@ router.post('/businesses/register', async (req, res) => {
       phone: phone.trim(),
       state: state || 'Delhi (NCT)',
       city: city.trim(),
-      serviceCategory: serviceCategory || 'AC Service & Gas Charging',
+      serviceCategory: serviceCategory || 'AC Services',
       isPaid: Boolean(isPaid),
       status: status || 'Active'
     });
@@ -153,7 +152,6 @@ router.post('/businesses/register', async (req, res) => {
   }
 });
 
-// Excel bulk upload
 router.post('/businesses/bulk-upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -176,7 +174,7 @@ router.post('/businesses/bulk-upload', upload.single('file'), async (req, res) =
         phone: String(r.phone).trim(),
         state: String(r.state || 'Delhi (NCT)').trim(),
         city: String(r.city || 'New Delhi').trim(),
-        serviceCategory: String(r.serviceCategory || 'AC Service & Gas Charging').trim(),
+        serviceCategory: String(r.serviceCategory || 'AC Services').trim(),
         status: r.status || 'Active',
         isPaid: Boolean(r.isPaid === true || r.isPaid === 'true')
       }));
@@ -197,7 +195,6 @@ router.post('/businesses/bulk-upload', upload.single('file'), async (req, res) =
   }
 });
 
-// Update business status
 router.put('/businesses/:id', async (req, res) => {
   try {
     const { status } = req.body;
@@ -217,11 +214,80 @@ router.put('/businesses/:id', async (req, res) => {
   }
 });
 
-// Delete business
 router.delete('/businesses/:id', async (req, res) => {
   try {
     await Business.findByIdAndDelete(req.params.id);
     return res.status(200).json({ success: true, message: 'Business successfully deleted' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================================
+// 7. BLOG APPROVALS & STATUS TOGGLE (PATCH + PUT)
+// ============================================================================
+const handleBlogStatusUpdate = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const updatedBlog = await Blog.findByIdAndUpdate(
+      req.params.id,
+      { $set: { status } },
+      { new: true }
+    );
+    if (!updatedBlog) {
+      return res.status(404).json({ success: false, message: 'Blog not found' });
+    }
+    return res.status(200).json({
+      success: true,
+      message: `Blog status updated to ${status}`,
+      data: updatedBlog
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+router.patch('/blogs/:id/status', handleBlogStatusUpdate);
+router.put('/blogs/:id', handleBlogStatusUpdate);
+
+// ============================================================================
+// 8. ADMIN COMMENTS MODERATION
+// ============================================================================
+router.get('/comments', async (req, res) => {
+  try {
+    const { status } = req.query;
+    let query = {};
+    if (status && status !== 'All') {
+      query.status = status;
+    }
+    const comments = await Comment.find(query)
+      .populate('blog', 'title slug')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({ success: true, count: comments.length, data: comments });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.put('/comments/:id', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const updated = await Comment.findByIdAndUpdate(
+      req.params.id,
+      { $set: { status } },
+      { new: true }
+    );
+    return res.status(200).json({ success: true, data: updated });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.delete('/comments/:id', async (req, res) => {
+  try {
+    await Comment.findByIdAndDelete(req.params.id);
+    return res.status(200).json({ success: true, message: 'Comment deleted successfully' });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
